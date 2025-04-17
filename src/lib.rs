@@ -18,6 +18,7 @@ pub struct GoogleCloudReporter {
     tokio_runtime: std::sync::LazyLock<tokio::runtime::Runtime>,
     client: TraceService,
     trace_project_id: String,
+    service_name: Option<String>,
     attribute_name_mappings: Option<HashMap<&'static str, &'static str>>,
     status_converter: fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> Option<Status>,
     span_kind_converter: fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> SpanKind,
@@ -78,6 +79,7 @@ impl GoogleCloudReporter {
             }),
             client,
             trace_project_id,
+            service_name: None,
             attribute_name_mappings: None,
             status_converter: |_, _| None,
             span_kind_converter: |_, attribute_map| {
@@ -91,6 +93,11 @@ impl GoogleCloudReporter {
             },
             stack_trace_converter: |_, _| None,
         }
+    }
+
+    pub fn service_name(mut self, service_name: Option<String>) -> Self {
+        self.service_name = service_name;
+        self
     }
 
     pub fn attribute_name_mappings(
@@ -132,7 +139,7 @@ impl GoogleCloudReporter {
         let span_id = convert_span_id(span.span_id);
 
         let mut attributes =
-            convert_properties(&span.properties, self.attribute_name_mappings.as_ref());
+            self.convert_properties(&span.properties, self.attribute_name_mappings.as_ref());
         let status = (self.status_converter)(&span, &mut attributes.attribute_map);
         let span_kind = (self.span_kind_converter)(&span, &mut attributes.attribute_map);
         let stack_trace = (self.stack_trace_converter)(&span, &mut attributes.attribute_map);
@@ -167,12 +174,42 @@ impl GoogleCloudReporter {
             .set_time(convert_unix_ns(event.timestamp_unix_ns))
             .set_annotation(
                 Annotation::new()
-                    .set_attributes(convert_properties(
+                    .set_attributes(self.convert_properties(
                         &event.properties,
                         self.attribute_name_mappings.as_ref(),
                     ))
                     .set_description(TruncatableString::new().set_value(event.name)),
             )
+    }
+
+    fn convert_properties(
+        &self,
+        properties: &[(Cow<'static, str>, Cow<'static, str>)],
+        attribute_name_mappings: Option<&HashMap<&'static str, &'static str>>,
+    ) -> Attributes {
+        let mut attributes = HashMap::with_capacity(properties.len() + 1);
+
+        if let Some(service_name) = &self.service_name {
+            attributes.insert(
+                "service.name".to_string(),
+                AttributeValue::new()
+                    .set_string_value(TruncatableString::new().set_value(service_name)),
+            );
+        }
+
+        attributes.extend(properties.iter().map(|(k, v)| {
+            let key = attribute_name_mappings
+                .as_ref()
+                .and_then(|m| m.get(k.as_ref()).copied())
+                .unwrap_or(k.as_ref());
+            (
+                key.to_string(),
+                AttributeValue::new()
+                    .set_string_value(TruncatableString::new().set_value(v.to_string())),
+            )
+        }));
+
+        Attributes::new().set_attribute_map(attributes)
     }
 
     fn try_report(&self, spans: Vec<SpanRecord>) -> google_cloud_trace_v2::Result<()> {
@@ -192,28 +229,9 @@ impl Reporter for GoogleCloudReporter {
         }
 
         if let Err(err) = self.try_report(spans) {
-            log::error!("report to Google Cloud Trace failed: {}", err);
+            log::error!("report to Google Cloud Trace failed: {err}");
         }
     }
-}
-
-fn convert_properties(
-    properties: &[(Cow<'static, str>, Cow<'static, str>)],
-    attribute_name_mappings: Option<&HashMap<&'static str, &'static str>>,
-) -> Attributes {
-    let attributes = properties.iter().map(|(k, v)| {
-        let key = attribute_name_mappings
-            .as_ref()
-            .and_then(|m| m.get(k.as_ref()).cloned())
-            .unwrap_or(k.as_ref());
-        (
-            key.to_string(),
-            AttributeValue::new()
-                .set_string_value(TruncatableString::new().set_value(v.to_string())),
-        )
-    });
-
-    Attributes::new().set_attribute_map(attributes)
 }
 
 fn convert_unix_ns(unix_time: u64) -> Timestamp {
