@@ -68,7 +68,7 @@ pub fn opentelemetry_semantic_mapping() -> HashMap<&'static str, &'static str> {
 }
 
 impl GoogleCloudReporter {
-    pub fn new(client: TraceService, trace_project_id: String) -> Self {
+    pub fn new(client: TraceService, trace_project_id: impl Into<String>) -> Self {
         Self {
             tokio_runtime: LazyLock::new(|| {
                 tokio::runtime::Builder::new_current_thread()
@@ -78,7 +78,7 @@ impl GoogleCloudReporter {
                     .unwrap()
             }),
             client,
-            trace_project_id,
+            trace_project_id: trace_project_id.into(),
             service_name: None,
             attribute_name_mappings: None,
             status_converter: |_, _| None,
