@@ -95,8 +95,8 @@ impl GoogleCloudReporter {
         }
     }
 
-    pub fn service_name(mut self, service_name: Option<String>) -> Self {
-        self.service_name = service_name;
+    pub fn service_name(mut self, service_name: impl Into<String>) -> Self {
+        self.service_name = Some(service_name.into());
         self
     }
 
