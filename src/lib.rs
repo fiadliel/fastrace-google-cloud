@@ -136,7 +136,7 @@ impl GoogleCloudReporter {
     }
 
     fn convert_span(&self, span: SpanRecord) -> GoogleSpan {
-        let span_id = convert_span_id(span.span_id);
+        let span_id = span.span_id.to_string();
 
         let mut attributes =
             self.convert_properties(&span.properties, self.attribute_name_mappings.as_ref());
@@ -146,8 +146,8 @@ impl GoogleCloudReporter {
 
         let mut google_span = GoogleSpan::new()
             .set_name(format!(
-                "projects/{}/traces/{:032x}/spans/{}",
-                self.trace_project_id, span.trace_id.0, span_id
+                "projects/{}/traces/{}/spans/{}",
+                self.trace_project_id, span.trace_id, span_id
             ))
             .set_span_id(span_id)
             .set_display_name(TruncatableString::new().set_value(span.name))
@@ -241,18 +241,9 @@ fn convert_unix_ns(unix_time: u64) -> Timestamp {
     )
 }
 
-/// Convert a span ID to a string representation.
-fn convert_span_id(span_id: SpanId) -> String {
-    format!("{:016x}", span_id.0)
-}
-
 /// Convert a parent span ID to a string representation.
 ///
 /// Returns `None` if the parent span ID is invalid (zero).
 fn convert_parent_span_id(span_id: SpanId) -> Option<String> {
-    if span_id.0 == 0 {
-        None
-    } else {
-        Some(convert_span_id(span_id))
-    }
+    (span_id.0 != 0).then_some(span_id.to_string())
 }
