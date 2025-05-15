@@ -88,7 +88,7 @@ impl GoogleCloudReporter {
                 span_kind
                     .as_ref()
                     .and_then(|value| value.string_value())
-                    .and_then(|s| SpanKind::try_from(s.value.as_ref()).ok())
+                    .map(|s| SpanKind::from(s.value.as_ref()))
                     .unwrap_or(SpanKind::Internal)
             },
             stack_trace_converter: |_, _| None,
