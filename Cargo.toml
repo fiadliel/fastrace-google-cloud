@@ -5,9 +5,9 @@ edition = "2024"
 
 [dependencies]
 fastrace = "0.7.9"
-google-cloud-rpc = "0.2.0"
-google-cloud-trace-v2 = "0.2.0"
-google-cloud-wkt = "0.3.0"
+google-cloud-rpc = "0.3.0"
+google-cloud-trace-v2 = "0.3.0"
+google-cloud-wkt = "0.4.0"
 log = "0.4.27"
 opentelemetry-semantic-conventions = { version = "0.29.0", features = ["semconv_experimental"] }
 tokio = { version = "1.44.2", default-features = false, features = ["rt"] }

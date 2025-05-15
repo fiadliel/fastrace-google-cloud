@@ -88,8 +88,8 @@ impl GoogleCloudReporter {
                 span_kind
                     .as_ref()
                     .and_then(|value| value.string_value())
-                    .and_then(|s| SpanKind::from_str_name(&s.value))
-                    .unwrap_or(SpanKind::INTERNAL)
+                    .and_then(|s| SpanKind::try_from(s.value.as_ref()).ok())
+                    .unwrap_or(SpanKind::Internal)
             },
             stack_trace_converter: |_, _| None,
         }
@@ -215,7 +215,8 @@ impl GoogleCloudReporter {
     fn try_report(&self, spans: Vec<SpanRecord>) -> google_cloud_trace_v2::Result<()> {
         self.tokio_runtime.block_on(
             self.client
-                .batch_write_spans(format!("projects/{}", self.trace_project_id))
+                .batch_write_spans()
+                .set_name(format!("projects/{}", self.trace_project_id))
                 .set_spans(spans.into_iter().map(|s| self.convert_span(s)))
                 .send(),
         )
