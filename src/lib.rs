@@ -141,33 +141,6 @@ pub fn opentelemetry_semantic_mapping() -> HashMap<&'static str, &'static str> {
 }
 
 impl GoogleCloudReporter {
-    pub fn new_with_client(client: TraceService, trace_project_id: impl Into<String>) -> Self {
-        Self {
-            tokio_runtime: LazyLock::new(|| {
-                tokio::runtime::Builder::new_current_thread()
-                    .enable_io()
-                    .enable_time()
-                    .build()
-                    .unwrap()
-            }),
-            client,
-            trace_project_id: trace_project_id.into(),
-            service_name: None,
-            attribute_name_mappings: None,
-            status_converter: |_, _| None,
-            span_kind_converter: |_, attribute_map| {
-                let span_kind = attribute_map.remove("span.kind");
-
-                span_kind
-                    .as_ref()
-                    .and_then(|value| value.string_value())
-                    .map(|s| SpanKind::from(s.value.as_ref()))
-                    .unwrap_or(SpanKind::Internal)
-            },
-            stack_trace_converter: |_, _| None,
-        }
-    }
-
     fn convert_span(&self, span: SpanRecord) -> GoogleSpan {
         let span_id = span.span_id.to_string();
 
