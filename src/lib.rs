@@ -75,7 +75,7 @@ impl GoogleCloudReporter {
         client: Option<TraceService>,
         trace_project_id: impl Into<String>,
         service_name: Option<impl Into<String>>,
-        attribute_name_mappings: Option<HashMap<&'static str, &'static str>>,
+        attribute_name_mappings: Option<impl IntoIterator<Item = (&'static str, &'static str)>>,
         status_converter: Option<
             fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> Option<Status>,
         >,
@@ -91,7 +91,8 @@ impl GoogleCloudReporter {
             client: client.unwrap_or(default_trace_client().await),
             trace_project_id: trace_project_id.into(),
             service_name: service_name.map(Into::into),
-            attribute_name_mappings,
+            attribute_name_mappings: attribute_name_mappings
+                .map(|values| values.into_iter().collect()),
             status_converter: status_converter.unwrap_or(|_, _| None),
             span_kind_converter: span_kind_converter.unwrap_or(default_span_kind_converter),
             stack_trace_converter: stack_trace_converter.unwrap_or(|_, _| None),
