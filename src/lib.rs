@@ -1,10 +1,14 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use fastrace::collector::{EventRecord, Reporter};
 use fastrace::prelude::*;
+use google_cloud_gax::exponential_backoff;
+use google_cloud_gax::retry_policy::{self, RetryPolicyExt as _};
 use google_cloud_rpc::model::Status;
+pub use google_cloud_trace_v2::Error as TraceClientError;
 use google_cloud_trace_v2::client::TraceService;
 use google_cloud_trace_v2::model::span::time_event::Annotation;
 use google_cloud_trace_v2::model::span::{Attributes, SpanKind, TimeEvent, TimeEvents};
@@ -13,6 +17,43 @@ use google_cloud_trace_v2::model::{
 };
 use google_cloud_wkt::Timestamp;
 use opentelemetry_semantic_conventions::attribute as attribute_sem;
+
+fn default_tokio_runtime() -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .unwrap()
+}
+
+async fn default_trace_client() -> TraceService {
+    google_cloud_trace_v2::client::TraceService::builder()
+        .with_retry_policy(retry_policy::Aip194Strict.with_time_limit(Duration::from_secs(120)))
+        .with_backoff_policy(
+            exponential_backoff::ExponentialBackoffBuilder::new()
+                .with_initial_delay(Duration::from_millis(100))
+                .with_maximum_delay(Duration::from_secs(30))
+                .with_scaling(2)
+                .build()
+                .unwrap(),
+        )
+        .build()
+        .await
+        .unwrap()
+}
+
+fn default_span_kind_converter(
+    _span_record: &SpanRecord,
+    attribute_map: &mut HashMap<String, AttributeValue>,
+) -> SpanKind {
+    let span_kind = attribute_map.remove("span.kind");
+
+    span_kind
+        .as_ref()
+        .and_then(|value| value.string_value())
+        .map(|s| SpanKind::from(s.value.as_ref()))
+        .unwrap_or(SpanKind::Internal)
+}
 
 pub struct GoogleCloudReporter {
     tokio_runtime: std::sync::LazyLock<tokio::runtime::Runtime>,
@@ -24,6 +65,38 @@ pub struct GoogleCloudReporter {
     span_kind_converter: fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> SpanKind,
     stack_trace_converter:
         fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> Option<StackTrace>,
+}
+
+#[bon::bon]
+impl GoogleCloudReporter {
+    #[builder]
+    pub async fn new(
+        tokio_runtime: Option<fn() -> tokio::runtime::Runtime>,
+        client: Option<TraceService>,
+        trace_project_id: impl Into<String>,
+        service_name: Option<impl Into<String>>,
+        attribute_name_mappings: Option<HashMap<&'static str, &'static str>>,
+        status_converter: Option<
+            fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> Option<Status>,
+        >,
+        span_kind_converter: Option<
+            fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> SpanKind,
+        >,
+        stack_trace_converter: Option<
+            fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> Option<StackTrace>,
+        >,
+    ) -> Self {
+        Self {
+            tokio_runtime: LazyLock::new(tokio_runtime.unwrap_or(default_tokio_runtime)),
+            client: client.unwrap_or(default_trace_client().await),
+            trace_project_id: trace_project_id.into(),
+            service_name: service_name.map(Into::into),
+            attribute_name_mappings,
+            status_converter: status_converter.unwrap_or(|_, _| None),
+            span_kind_converter: span_kind_converter.unwrap_or(default_span_kind_converter),
+            stack_trace_converter: stack_trace_converter.unwrap_or(|_, _| None),
+        }
+    }
 }
 
 pub fn opentelemetry_semantic_mapping() -> HashMap<&'static str, &'static str> {
@@ -68,7 +141,7 @@ pub fn opentelemetry_semantic_mapping() -> HashMap<&'static str, &'static str> {
 }
 
 impl GoogleCloudReporter {
-    pub fn new(client: TraceService, trace_project_id: impl Into<String>) -> Self {
+    pub fn new_with_client(client: TraceService, trace_project_id: impl Into<String>) -> Self {
         Self {
             tokio_runtime: LazyLock::new(|| {
                 tokio::runtime::Builder::new_current_thread()
@@ -93,46 +166,6 @@ impl GoogleCloudReporter {
             },
             stack_trace_converter: |_, _| None,
         }
-    }
-
-    pub fn service_name(mut self, service_name: impl Into<String>) -> Self {
-        self.service_name = Some(service_name.into());
-        self
-    }
-
-    pub fn attribute_name_mappings(
-        mut self,
-        attribute_name_mappings: Option<HashMap<&'static str, &'static str>>,
-    ) -> Self {
-        self.attribute_name_mappings = attribute_name_mappings;
-        self
-    }
-
-    pub fn status_converter(
-        mut self,
-        status_converter: fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> Option<Status>,
-    ) -> Self {
-        self.status_converter = status_converter;
-        self
-    }
-
-    pub fn span_kind_converter(
-        mut self,
-        span_kind_converter: fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> SpanKind,
-    ) -> Self {
-        self.span_kind_converter = span_kind_converter;
-        self
-    }
-
-    pub fn stack_trace_converter(
-        mut self,
-        stack_trace_converter: fn(
-            &SpanRecord,
-            &mut HashMap<String, AttributeValue>,
-        ) -> Option<StackTrace>,
-    ) -> Self {
-        self.stack_trace_converter = stack_trace_converter;
-        self
     }
 
     fn convert_span(&self, span: SpanRecord) -> GoogleSpan {

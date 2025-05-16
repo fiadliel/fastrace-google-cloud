@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bon = "3.6.3"
 fastrace = "0.7.9"
+google-cloud-gax = "0.22.0"
 google-cloud-rpc = "0.3.0"
 google-cloud-trace-v2 = "0.3.0"
 google-cloud-wkt = "0.4.0"
