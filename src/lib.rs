@@ -57,7 +57,7 @@ fn default_span_kind_converter(
 
 pub struct GoogleCloudReporter {
     tokio_runtime: std::sync::LazyLock<tokio::runtime::Runtime>,
-    client: TraceService,
+    trace_client: TraceService,
     trace_project_id: String,
     service_name: Option<String>,
     attribute_name_mappings: Option<HashMap<&'static str, &'static str>>,
@@ -72,7 +72,7 @@ impl GoogleCloudReporter {
     #[builder]
     pub async fn new(
         tokio_runtime: Option<fn() -> tokio::runtime::Runtime>,
-        client: Option<TraceService>,
+        trace_client: Option<TraceService>,
         trace_project_id: impl Into<String>,
         service_name: Option<impl Into<String>>,
         attribute_name_mappings: Option<impl IntoIterator<Item = (&'static str, &'static str)>>,
@@ -88,7 +88,7 @@ impl GoogleCloudReporter {
     ) -> Self {
         Self {
             tokio_runtime: LazyLock::new(tokio_runtime.unwrap_or(default_tokio_runtime)),
-            client: client.unwrap_or(default_trace_client().await),
+            trace_client: trace_client.unwrap_or(default_trace_client().await),
             trace_project_id: trace_project_id.into(),
             service_name: service_name.map(Into::into),
             attribute_name_mappings: attribute_name_mappings
@@ -221,7 +221,7 @@ impl GoogleCloudReporter {
 
     fn try_report(&self, spans: Vec<SpanRecord>) -> google_cloud_trace_v2::Result<()> {
         self.tokio_runtime.block_on(
-            self.client
+            self.trace_client
                 .batch_write_spans()
                 .set_name(format!("projects/{}", self.trace_project_id))
                 .set_spans(spans.into_iter().map(|s| self.convert_span(s)))
