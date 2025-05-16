@@ -26,7 +26,7 @@ fn default_tokio_runtime() -> tokio::runtime::Runtime {
         .unwrap()
 }
 
-async fn default_trace_client() -> TraceService {
+async fn default_trace_client() -> Result<TraceService, TraceClientError> {
     google_cloud_trace_v2::client::TraceService::builder()
         .with_retry_policy(retry_policy::Aip194Strict.with_time_limit(Duration::from_secs(120)))
         .with_backoff_policy(
@@ -34,12 +34,10 @@ async fn default_trace_client() -> TraceService {
                 .with_initial_delay(Duration::from_millis(100))
                 .with_maximum_delay(Duration::from_secs(30))
                 .with_scaling(2)
-                .build()
-                .unwrap(),
+                .build()?,
         )
         .build()
         .await
-        .unwrap()
 }
 
 fn default_span_kind_converter(
@@ -55,48 +53,36 @@ fn default_span_kind_converter(
         .unwrap_or(SpanKind::Internal)
 }
 
+#[derive(bon::Builder)]
+#[builder(finish_fn(vis = "", name = build_internal))]
 pub struct GoogleCloudReporter {
+    #[builder(default = LazyLock::new(default_tokio_runtime), with = |s: fn() -> tokio::runtime::Runtime| LazyLock::new(s))]
     tokio_runtime: std::sync::LazyLock<tokio::runtime::Runtime>,
-    trace_client: TraceService,
+    trace_client: Option<TraceService>,
+    #[builder(into)]
     trace_project_id: String,
+    #[builder(into)]
     service_name: Option<String>,
+    #[builder(with = FromIterator::from_iter)]
     attribute_name_mappings: Option<HashMap<&'static str, &'static str>>,
+    #[builder(default = |_, _| None)]
     status_converter: fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> Option<Status>,
+    #[builder(default = default_span_kind_converter)]
     span_kind_converter: fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> SpanKind,
+    #[builder(default = |_, _| None)]
     stack_trace_converter:
         fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> Option<StackTrace>,
 }
 
-#[bon::bon]
-impl GoogleCloudReporter {
-    #[builder]
-    pub async fn new(
-        tokio_runtime: Option<fn() -> tokio::runtime::Runtime>,
-        trace_client: Option<TraceService>,
-        trace_project_id: impl Into<String>,
-        service_name: Option<impl Into<String>>,
-        attribute_name_mappings: Option<impl IntoIterator<Item = (&'static str, &'static str)>>,
-        status_converter: Option<
-            fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> Option<Status>,
-        >,
-        span_kind_converter: Option<
-            fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> SpanKind,
-        >,
-        stack_trace_converter: Option<
-            fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> Option<StackTrace>,
-        >,
-    ) -> Self {
-        Self {
-            tokio_runtime: LazyLock::new(tokio_runtime.unwrap_or(default_tokio_runtime)),
-            trace_client: trace_client.unwrap_or(default_trace_client().await),
-            trace_project_id: trace_project_id.into(),
-            service_name: service_name.map(Into::into),
-            attribute_name_mappings: attribute_name_mappings
-                .map(|values| values.into_iter().collect()),
-            status_converter: status_converter.unwrap_or(|_, _| None),
-            span_kind_converter: span_kind_converter.unwrap_or(default_span_kind_converter),
-            stack_trace_converter: stack_trace_converter.unwrap_or(|_, _| None),
+impl<S: google_cloud_reporter_builder::IsComplete> GoogleCloudReporterBuilder<S> {
+    pub async fn build(self) -> Result<GoogleCloudReporter, TraceClientError> {
+        let mut reporter = self.build_internal();
+
+        if reporter.trace_client.is_none() {
+            reporter.trace_client = Some(default_trace_client().await?)
         }
+
+        Ok(reporter)
     }
 }
 
@@ -222,6 +208,8 @@ impl GoogleCloudReporter {
     fn try_report(&self, spans: Vec<SpanRecord>) -> google_cloud_trace_v2::Result<()> {
         self.tokio_runtime.block_on(
             self.trace_client
+                .as_ref()
+                .unwrap()
                 .batch_write_spans()
                 .set_name(format!("projects/{}", self.trace_project_id))
                 .set_spans(spans.into_iter().map(|s| self.convert_span(s)))
