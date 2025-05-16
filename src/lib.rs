@@ -63,7 +63,7 @@ pub struct GoogleCloudReporter {
     trace_project_id: String,
     #[builder(into)]
     service_name: Option<String>,
-    #[builder(with = FromIterator::from_iter)]
+    #[builder(with = <_>::from_iter)]
     attribute_name_mappings: Option<HashMap<&'static str, &'static str>>,
     #[builder(default = |_, _| None)]
     status_converter: fn(&SpanRecord, &mut HashMap<String, AttributeValue>) -> Option<Status>,
