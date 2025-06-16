@@ -1,3 +1,5 @@
+mod opentelemetry;
+
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -16,7 +18,7 @@ use google_cloud_trace_v2::model::{
     AttributeValue, Span as GoogleSpan, StackTrace, TruncatableString,
 };
 use google_cloud_wkt::Timestamp;
-use opentelemetry_semantic_conventions::attribute as attribute_sem;
+pub use opentelemetry::opentelemetry_semantic_mapping;
 
 fn default_tokio_runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Builder::new_current_thread()
@@ -26,7 +28,7 @@ fn default_tokio_runtime() -> tokio::runtime::Runtime {
         .unwrap()
 }
 
-async fn default_trace_client() -> Result<TraceService, TraceClientError> {
+async fn default_trace_client() -> Result<TraceService, google_cloud_gax::client_builder::Error> {
     google_cloud_trace_v2::client::TraceService::builder()
         .with_retry_policy(retry_policy::Aip194Strict.with_time_limit(Duration::from_secs(120)))
         .with_backoff_policy(
@@ -34,7 +36,8 @@ async fn default_trace_client() -> Result<TraceService, TraceClientError> {
                 .with_initial_delay(Duration::from_millis(100))
                 .with_maximum_delay(Duration::from_secs(30))
                 .with_scaling(2)
-                .build()?,
+                .build()
+                .expect("Invalid scaling parameters set for default trace service client"),
         )
         .build()
         .await
@@ -49,7 +52,7 @@ fn default_span_kind_converter(
     span_kind
         .as_ref()
         .and_then(|value| value.string_value())
-        .map(|s| SpanKind::from(s.value.as_ref()))
+        .map(|s| SpanKind::from(&*s.value))
         .unwrap_or(SpanKind::Internal)
 }
 
@@ -74,7 +77,9 @@ pub struct GoogleCloudReporter {
 }
 
 impl<S: google_cloud_reporter_builder::IsComplete> GoogleCloudReporterBuilder<S> {
-    pub async fn build(self) -> Result<GoogleCloudReporter, TraceClientError> {
+    pub async fn build(
+        self,
+    ) -> Result<GoogleCloudReporter, google_cloud_gax::client_builder::Error> {
         let mut reporter = self.build_internal();
 
         if reporter.trace_client.is_none() {
@@ -83,47 +88,6 @@ impl<S: google_cloud_reporter_builder::IsComplete> GoogleCloudReporterBuilder<S>
 
         Ok(reporter)
     }
-}
-
-pub fn opentelemetry_semantic_mapping() -> HashMap<&'static str, &'static str> {
-    HashMap::from([
-        (attribute_sem::OTEL_COMPONENT_TYPE, "/component"),
-        (attribute_sem::EXCEPTION_MESSAGE, "/error/message"),
-        (attribute_sem::EXCEPTION_MESSAGE, "/error/name"),
-        (
-            attribute_sem::NETWORK_PROTOCOL_VERSION,
-            "/http/client_protocol",
-        ),
-        (attribute_sem::HTTP_HOST, "/http/host"),
-        (attribute_sem::HTTP_METHOD, "/http/method"),
-        (attribute_sem::HTTP_REQUEST_METHOD, "/http/method"),
-        // Not a standard OTEL attribute, but some existing systems have this mapping
-        ("http.path", "/http/path"),
-        (attribute_sem::URL_PATH, "/http/path"),
-        (attribute_sem::HTTP_REQUEST_SIZE, "/http/request/size"),
-        (attribute_sem::HTTP_RESPONSE_SIZE, "/http/response/size"),
-        (attribute_sem::HTTP_ROUTE, "/http/route"),
-        (
-            attribute_sem::HTTP_RESPONSE_STATUS_CODE,
-            "/http/status_code",
-        ),
-        (attribute_sem::HTTP_STATUS_CODE, "/http/status_code"),
-        (attribute_sem::HTTP_USER_AGENT, "/http/user_agent"),
-        (attribute_sem::USER_AGENT_ORIGINAL, "/http/user_agent"),
-        (
-            attribute_sem::K8S_CLUSTER_NAME,
-            "g.co/r/k8s_container/cluster_name",
-        ),
-        (
-            attribute_sem::K8S_NAMESPACE_NAME,
-            "g.co/r/k8s_container/namespace",
-        ),
-        (attribute_sem::K8S_POD_NAME, "g.co/r/k8s_container/pod_name"),
-        (
-            attribute_sem::K8S_CONTAINER_NAME,
-            "g.co/r/k8s_container/container_name",
-        ),
-    ])
 }
 
 impl GoogleCloudReporter {
@@ -146,9 +110,9 @@ impl GoogleCloudReporter {
             .set_start_time(convert_unix_ns(span.begin_time_unix_ns))
             .set_end_time(convert_unix_ns(span.begin_time_unix_ns + span.duration_ns))
             .set_attributes(attributes)
-            .set_status(status)
+            .set_or_clear_status(status)
             .set_span_kind(span_kind)
-            .set_stack_trace(stack_trace)
+            .set_or_clear_stack_trace(stack_trace)
             .set_time_events(
                 TimeEvents::new()
                     .set_time_event(span.events.into_iter().map(|e| self.convert_event(e))),
