@@ -8,6 +8,8 @@ pub fn opentelemetry_semantic_mapping() -> HashMap<&'static str, &'static str> {
         (attribute::EXCEPTION_MESSAGE, "/error/message"),
         (attribute::EXCEPTION_MESSAGE, "/error/name"),
         (attribute::NETWORK_PROTOCOL_VERSION, "/http/client_protocol"),
+        (attribute::SERVER_ADDRESS, "/http/host"),
+        (attribute::CLIENT_ADDRESS, "/http/host"),
         (attribute::HTTP_HOST, "/http/host"),
         (attribute::HTTP_METHOD, "/http/method"),
         (attribute::HTTP_REQUEST_METHOD, "/http/method"),
