@@ -1,12 +1,30 @@
+#![allow(deprecated)]
+/// Attribute mapping utilities for OpenTelemetry semantic conventions.
+///
+/// This module provides a mapping from OpenTelemetry semantic convention attribute keys
+/// to Google Cloud Trace attribute keys, for use in span and event reporting.
 use std::collections::HashMap;
 
 use opentelemetry_semantic_conventions::attribute;
 
+/// Returns a mapping from OpenTelemetry semantic convention attribute keys to
+/// Google Cloud Trace attribute keys.
+///
+/// This mapping is used to translate OTEL attributes to the corresponding
+/// Google Cloud Trace attributes when reporting spans and events.
+///
+/// # Example
+///
+/// ```rust
+/// use fastrace_google_cloud::opentelemetry_semantic_mapping;
+/// let mapping = opentelemetry_semantic_mapping();
+/// assert!(mapping.contains_key("http.method"));
+/// ```
 pub fn opentelemetry_semantic_mapping() -> HashMap<&'static str, &'static str> {
     HashMap::from([
         (attribute::OTEL_COMPONENT_TYPE, "/component"),
         (attribute::EXCEPTION_MESSAGE, "/error/message"),
-        (attribute::EXCEPTION_MESSAGE, "/error/name"),
+        (attribute::EXCEPTION_TYPE, "/error/name"),
         (attribute::NETWORK_PROTOCOL_VERSION, "/http/client_protocol"),
         (attribute::SERVER_ADDRESS, "/http/host"),
         (attribute::CLIENT_ADDRESS, "/http/host"),

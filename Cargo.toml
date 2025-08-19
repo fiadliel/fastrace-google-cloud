@@ -14,3 +14,6 @@ google-cloud-wkt = "0.5"
 log = "0.4"
 opentelemetry-semantic-conventions = { version = "0.30", features = ["semconv_experimental"] }
 tokio = { version = "1", default-features = false, features = ["rt"] }
+
+[dev-dependencies]
+fastrace = { version = "0.7", features = ["enable"]}

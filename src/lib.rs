@@ -1,3 +1,53 @@
+//! Google Cloud Trace reporter for fastrace.
+//!
+//! This crate provides a `Reporter` implementation for [fastrace](https://github.com/fast/fastrace)
+//! that sends spans and events to Google Cloud Trace.
+//!
+//! # Example
+//!
+//! ```rust
+//! use fastrace::prelude::*;
+//! use fastrace_google_cloud::GoogleCloudReporter;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let mut reporter = GoogleCloudReporter::builder()
+//!         .trace_project_id("your-gcp-project-id")
+//!         .service_name("my-service")
+//!         .build()
+//!         .await?;
+//!
+//!     fastrace::set_reporter(reporter, Config::default());
+//!
+//!     // Rest of the application.
+//! }
+//! ```
+//!
+//! (remember to set the `enable` flag on fastrace!)
+//!
+//! # Features
+//!
+//! - Integrates with `fastrace` for distributed tracing in Rust
+//! - Reports spans and events to Google Cloud Trace
+//! - Supports custom attribute mappings and converters
+//! - Async and high-performance
+//!
+//! # Configuration
+//!
+//! - `trace_project_id`: Google Cloud project ID
+//! - `service_name`: Optional service name for trace data
+//! - Custom converters for status, span kind, stack trace
+//!
+//! See the README for more details.
+//!
+//! # License
+//!
+//! Licensed under Apache 2.0 or MIT.
+//!
+//! ---
+//!
+//! *Contributions and issues are welcome!*
+
 mod opentelemetry;
 
 use std::borrow::Cow;
@@ -56,6 +106,15 @@ fn default_span_kind_converter(
         .unwrap_or(SpanKind::Internal)
 }
 
+/// Builder for `GoogleCloudReporter`.
+///
+/// Use this builder to configure the Google Cloud Trace reporter.
+/// - `trace_project_id`: Google Cloud project ID.
+/// - `service_name`: Optional service name.
+/// - `attribute_name_mappings`: Optional custom attribute mappings.
+/// - `status_converter`: Optional custom status converter.
+/// - `span_kind_converter`: Optional custom span kind converter.
+/// - `stack_trace_converter`: Optional custom stack trace converter.
 #[derive(bon::Builder)]
 #[builder(finish_fn(vis = "", name = build_internal))]
 pub struct GoogleCloudReporter {
@@ -91,6 +150,7 @@ impl<S: google_cloud_reporter_builder::IsComplete> GoogleCloudReporterBuilder<S>
 }
 
 impl GoogleCloudReporter {
+    /// Converts a `SpanRecord` to a Google Cloud Trace `Span`.
     fn convert_span(&self, span: SpanRecord) -> GoogleSpan {
         let span_id = span.span_id.to_string();
 
@@ -125,6 +185,7 @@ impl GoogleCloudReporter {
         google_span
     }
 
+    /// Converts an `EventRecord` to a Google Cloud Trace `TimeEvent`.
     fn convert_event(&self, event: EventRecord) -> TimeEvent {
         TimeEvent::new()
             .set_time(convert_unix_ns(event.timestamp_unix_ns))
@@ -138,6 +199,7 @@ impl GoogleCloudReporter {
             )
     }
 
+    /// Converts properties and attribute mappings for Google Cloud Trace.
     fn convert_properties(
         &self,
         properties: &[(Cow<'static, str>, Cow<'static, str>)],
@@ -168,6 +230,7 @@ impl GoogleCloudReporter {
         Attributes::new().set_attribute_map(attributes)
     }
 
+    /// Reports a batch of spans to Google Cloud Trace.
     fn try_report(&self, spans: Vec<SpanRecord>) -> google_cloud_trace_v2::Result<()> {
         self.tokio_runtime.block_on(
             self.trace_client
@@ -181,7 +244,11 @@ impl GoogleCloudReporter {
     }
 }
 
+/// Reports spans to Google Cloud Trace.
+///
+/// Implements the `fastrace::collector::Reporter` trait.
 impl Reporter for GoogleCloudReporter {
+    /// Reports a batch of spans to Google Cloud Trace.
     fn report(&mut self, spans: Vec<SpanRecord>) {
         if spans.is_empty() {
             return;
@@ -193,6 +260,7 @@ impl Reporter for GoogleCloudReporter {
     }
 }
 
+/// Converts a unix timestamp in nanoseconds to a Google Cloud Trace `Timestamp`.
 fn convert_unix_ns(unix_time: u64) -> Timestamp {
     Timestamp::clamp(
         (unix_time / 1_000_000_000) as i64,
