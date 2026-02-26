@@ -7,12 +7,12 @@ rust-version = "1.85"
 [dependencies]
 bon = "3"
 fastrace = "0.7"
-google-cloud-gax = "1"
-google-cloud-rpc = "1"
-google-cloud-trace-v2 = "1"
-google-cloud-wkt = "1"
+google-cloud-gax = { version = "1", default-features = false }
+google-cloud-rpc = { version = "1", default-features = false }
+google-cloud-trace-v2 = { version = "1", default-features = false }
+google-cloud-wkt = { version = "1", default-features = false }
 log = "0.4"
-opentelemetry-semantic-conventions = { version = "0.30", features = ["semconv_experimental"] }
+opentelemetry-semantic-conventions = { version = "0.31", features = ["semconv_experimental"] }
 tokio = { version = "1", default-features = false, features = ["rt"] }
 
 [dev-dependencies]
